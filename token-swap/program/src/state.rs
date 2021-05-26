@@ -37,6 +37,8 @@ pub trait SwapState {
     fn fees(&self) -> &Fees;
     /// Curve associated with swap
     fn swap_curve(&self) -> &SwapCurve;
+    /// Initial amount of token
+    fn initial_amount(&self) -> u64;
 }
 
 /// All versions of SwapState
@@ -124,6 +126,9 @@ pub struct SwapV1 {
     /// Swap curve parameters, to be unpacked and used by the SwapCurve, which
     /// calculates swaps, deposits, and withdrawals
     pub swap_curve: SwapCurve,
+
+    /// Initial amount of token
+    pub initial_amount: u64,
 }
 
 impl SwapState for SwapV1 {
@@ -170,6 +175,10 @@ impl SwapState for SwapV1 {
     fn swap_curve(&self) -> &SwapCurve {
         &self.swap_curve
     }
+
+    fn initial_amount(&self) -> u64 {
+        self.initial_amount
+    }
 }
 
 impl Sealed for SwapV1 {}
@@ -180,10 +189,10 @@ impl IsInitialized for SwapV1 {
 }
 
 impl Pack for SwapV1 {
-    const LEN: usize = 323;
+    const LEN: usize = 331;
 
     fn pack_into_slice(&self, output: &mut [u8]) {
-        let output = array_mut_ref![output, 0, 323];
+        let output = array_mut_ref![output, 0, 331];
         let (
             is_initialized,
             nonce,
@@ -196,7 +205,8 @@ impl Pack for SwapV1 {
             pool_fee_account,
             fees,
             swap_curve,
-        ) = mut_array_refs![output, 1, 1, 32, 32, 32, 32, 32, 32, 32, 64, 33];
+            initial_amount,
+        ) = mut_array_refs![output, 1, 1, 32, 32, 32, 32, 32, 32, 32, 64, 33, 8];
         is_initialized[0] = self.is_initialized as u8;
         nonce[0] = self.nonce;
         token_program_id.copy_from_slice(self.token_program_id.as_ref());
@@ -208,11 +218,12 @@ impl Pack for SwapV1 {
         pool_fee_account.copy_from_slice(self.pool_fee_account.as_ref());
         self.fees.pack_into_slice(&mut fees[..]);
         self.swap_curve.pack_into_slice(&mut swap_curve[..]);
+        *initial_amount = self.initial_amount.to_le_bytes();
     }
 
     /// Unpacks a byte buffer into a [SwapV1](struct.SwapV1.html).
     fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
-        let input = array_ref![input, 0, 323];
+        let input = array_ref![input, 0, 331];
         #[allow(clippy::ptr_offset_with_cast)]
         let (
             is_initialized,
@@ -226,7 +237,8 @@ impl Pack for SwapV1 {
             pool_fee_account,
             fees,
             swap_curve,
-        ) = array_refs![input, 1, 1, 32, 32, 32, 32, 32, 32, 32, 64, 33];
+            initial_amount,
+        ) = array_refs![input, 1, 1, 32, 32, 32, 32, 32, 32, 32, 64, 33, 8];
         Ok(Self {
             is_initialized: match is_initialized {
                 [0] => false,
@@ -243,6 +255,7 @@ impl Pack for SwapV1 {
             pool_fee_account: Pubkey::new_from_array(*pool_fee_account),
             fees: Fees::unpack_from_slice(fees)?,
             swap_curve: SwapCurve::unpack_from_slice(swap_curve)?,
+            initial_amount: u64::from_le_bytes(*initial_amount),
         })
     }
 }
@@ -278,6 +291,8 @@ mod tests {
     const TEST_AMP: u64 = 1;
     const TEST_CURVE: StableCurve = StableCurve { amp: TEST_AMP };
 
+    const TEST_INITIAL_AMOUNT: u64 = 18446744073709551615;
+
     #[test]
     fn swap_version_pack() {
         let curve_type = TEST_CURVE_TYPE.try_into().unwrap();
@@ -298,6 +313,7 @@ mod tests {
             pool_fee_account: TEST_POOL_FEE_ACCOUNT,
             fees: TEST_FEES,
             swap_curve: swap_curve.clone(),
+            initial_amount: TEST_INITIAL_AMOUNT,
         });
 
         let mut packed = [0u8; SwapVersion::LATEST_LEN];
@@ -315,6 +331,7 @@ mod tests {
         assert_eq!(*unpacked.pool_fee_account(), TEST_POOL_FEE_ACCOUNT);
         assert_eq!(*unpacked.fees(), TEST_FEES);
         assert_eq!(*unpacked.swap_curve(), swap_curve);
+        assert_eq!(unpacked.initial_amount(), TEST_INITIAL_AMOUNT);
     }
 
     #[test]
@@ -337,6 +354,7 @@ mod tests {
             pool_fee_account: TEST_POOL_FEE_ACCOUNT,
             fees: TEST_FEES,
             swap_curve,
+            initial_amount: TEST_INITIAL_AMOUNT,
         };
 
         let mut packed = [0u8; SwapV1::LEN];
